@@ -5,7 +5,7 @@ let socket = null;
 
 // Replace host as in api.js
 //const SOCKET_URL = 'http://<YOUR_SERVER_HOST>:4000';
-const SOCKET_URL = "https://your-app.onrender.com";
+const SOCKET_URL = "https://chat-app-reactnative-nodejs.onrender.com";
 
 export async function createSocket() {
   if (socket && socket.connected) return socket;
