@@ -2,94 +2,155 @@ const jwt = require('jsonwebtoken');
 const Message = require('./models/Message');
 const Conversation = require('./models/Conversation');
 
-// userId (string) => Set(socketId)
+// Map userId -> Set of socketIds
 const userSockets = new Map();
 
 function setupSocket(io) {
+  // Authenticate user via JWT
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
-    if (!token) return next(new Error('auth error'));
+    if (!token) return next(new Error('Authentication error: token missing'));
     try {
       const payload = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = payload.id;
       next();
-    } catch (e) { next(new Error('auth error')); }
+    } catch (e) {
+      next(new Error('Authentication error: invalid token'));
+    }
   });
 
   io.on('connection', (socket) => {
     const uid = socket.userId;
-    console.log('socket connected', uid, socket.id);
+    console.log('Socket connected:', uid, socket.id);
 
-    // add socket id
+    // Add socket to user's active sockets
     if (!userSockets.has(uid)) userSockets.set(uid, new Set());
     userSockets.get(uid).add(socket.id);
 
-    // broadcast online
+    // Notify all users that this user is online
     io.emit('user:online', { userId: uid });
 
-    // typing events
-    socket.on('typing:start', ({ conversationId, toUserId }) => {
-      const set = userSockets.get(toUserId);
-      if (set) set.forEach(sid => io.to(sid).emit('typing:start', { conversationId, from: uid }));
-    });
-    socket.on('typing:stop', ({ conversationId, toUserId }) => {
-      const set = userSockets.get(toUserId);
-      if (set) set.forEach(sid => io.to(sid).emit('typing:stop', { conversationId, from: uid }));
+    /**
+     * Typing Indicator Events
+     */
+    socket.on('typing:start', ({ conversationId }) => {
+      // Broadcast to all other sockets in this conversation except sender
+      socket.broadcast.emit('typing:start', { conversationId, from: uid });
     });
 
-    // send message
+    socket.on('typing:stop', ({ conversationId }) => {
+      socket.broadcast.emit('typing:stop', { conversationId, from: uid });
+    });
+
+    /**
+     * Send Message Event
+     */
     socket.on('message:send', async (payload, ack) => {
       try {
         const { conversationId, toUserId, text } = payload;
-        const msg = await Message.create({ conversationId, senderId: uid, receiverId: toUserId, text });
-        await Conversation.findByIdAndUpdate(conversationId, { lastMessage: { text, senderId: uid, createdAt: msg.createdAt }, updatedAt: new Date() });
+        if (!conversationId || !toUserId || !text) {
+          return ack({ ok: false, error: 'Invalid payload' });
+        }
 
-        // send to recipient sockets
-        const set = userSockets.get(toUserId);
-        if (set) set.forEach(sid => io.to(sid).emit('message:new', msg));
+        // Save message in DB
+        const msg = await Message.create({
+          conversationId,
+          senderId: uid,
+          receiverId: toUserId,
+          text,
+          status: 'sent'
+        });
 
-        // ack sender
+        // Update conversation last message
+        await Conversation.findByIdAndUpdate(conversationId, {
+          lastMessage: { text, senderId: uid, createdAt: msg.createdAt },
+          updatedAt: new Date()
+        });
+
+        // Send message to recipient sockets
+        const recipientSockets = userSockets.get(toUserId);
+        if (recipientSockets) {
+          recipientSockets.forEach(sid => io.to(sid).emit('message:new', msg));
+        }
+
+        // Acknowledge sender
         ack({ ok: true, message: msg });
       } catch (e) {
-        console.error(e);
+        console.error('Error in message:send:', e);
         ack({ ok: false, error: e.message });
       }
     });
 
-    // delivered ack
+    /**
+     * Delivered Acknowledgement
+     */
     socket.on('message:delivered', async ({ messageId }) => {
       try {
-        const msg = await Message.findByIdAndUpdate(messageId, { status: 'delivered', deliveredAt: new Date() }, { new: true });
+        const msg = await Message.findByIdAndUpdate(
+          messageId,
+          { status: 'delivered', deliveredAt: new Date() },
+          { new: true }
+        );
+
+        if (!msg) return;
+
         const senderId = msg.senderId.toString();
-        const set = userSockets.get(senderId);
-        if (set) set.forEach(sid => io.to(sid).emit('message:delivered', { messageId: msg._id, deliveredAt: msg.deliveredAt }));
+        const senderSockets = userSockets.get(senderId);
+        if (senderSockets) {
+          senderSockets.forEach(sid =>
+            io.to(sid).emit('message:delivered', {
+              messageId: msg._id,
+              deliveredAt: msg.deliveredAt
+            })
+          );
+        }
       } catch (e) {
-        console.error(e);
+        console.error('Error in message:delivered:', e);
       }
     });
 
-    // read ack
+    /**
+     * Read Acknowledgement
+     */
     socket.on('message:read', async ({ messageId }) => {
       try {
-        const msg = await Message.findByIdAndUpdate(messageId, { status: 'read', readAt: new Date() }, { new: true });
+        const msg = await Message.findByIdAndUpdate(
+          messageId,
+          { status: 'read', readAt: new Date() },
+          { new: true }
+        );
+
+        if (!msg) return;
+
         const senderId = msg.senderId.toString();
-        const set = userSockets.get(senderId);
-        if (set) set.forEach(sid => io.to(sid).emit('message:read', { messageId: msg._id, readAt: msg.readAt }));
+        const senderSockets = userSockets.get(senderId);
+        if (senderSockets) {
+          senderSockets.forEach(sid =>
+            io.to(sid).emit('message:read', {
+              messageId: msg._id,
+              readAt: msg.readAt
+            })
+          );
+        }
       } catch (e) {
-        console.error(e);
+        console.error('Error in message:read:', e);
       }
     });
 
+    /**
+     * Disconnect Event
+     */
     socket.on('disconnect', () => {
-      const set = userSockets.get(uid);
-      if (set) {
-        set.delete(socket.id);
-        if (set.size === 0) {
+      const sockets = userSockets.get(uid);
+      if (sockets) {
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
           userSockets.delete(uid);
+          // Broadcast offline status with last seen timestamp
           io.emit('user:offline', { userId: uid, lastSeen: new Date() });
         }
       }
-      console.log('socket disconnected', uid, socket.id);
+      console.log('Socket disconnected:', uid, socket.id);
     });
   });
 }
