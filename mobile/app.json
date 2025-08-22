@@ -1,0 +1,8 @@
+{
+  "expo": {
+    "name": "ChatMobile",
+    "slug": "chat-mobile",
+    "platforms": ["ios","android"],
+    "version": "1.0.0"
+  }
+}
