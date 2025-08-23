@@ -1,29 +1,36 @@
-require('dotenv').config();
-const express = require('express');
-const http = require('http');
-const cors = require('cors');
 const { Server } = require('socket.io');
-const { connect } = require('./db');
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/users');
-const convRoutes = require('./routes/conversations');
-const setupSocket = require('./socket'); // ✅ No destructuring
+const Message = require('./models/Message');
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+function setupSocket(server) {
+  const io = new Server(server, {
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST'],
+    },
+  });
 
-app.use('/auth', authRoutes);
-app.use('/users', userRoutes);
-app.use('/conversations', convRoutes);
+  io.on('connection', (socket) => {
+    console.log('✅ User connected:', socket.id);
 
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-setupSocket(io);
+    socket.on('joinConversation', (conversationId) => {
+      socket.join(conversationId);
+      console.log(`✅ Joined conversation: ${conversationId}`);
+    });
 
-const PORT = process.env.PORT || 4000;
-connect(process.env.MONGO_URI).then(() => {
-  server.listen(PORT, () => console.log('Server listening on', PORT));
-}).catch((err) => {
-  console.error('DB connection failed', err);
-});
+    socket.on('sendMessage', async ({ conversationId, senderId, text }) => {
+      console.log(`📤 Message from ${senderId}: ${text}`);
+
+      const message = new Message({ conversationId, sender: senderId, text });
+      await message.save();
+
+      // Emit message to all users in this conversation
+      io.to(conversationId).emit('messageReceived', message);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('❌ User disconnected:', socket.id);
+    });
+  });
+}
+
+module.exports = setupSocket; // ✅ Correct export
