@@ -54,4 +54,4 @@ If run locally using **Node.js** and **React Native CLI / Expo CLI**, these issu
 ---
 
 ## Author
-Built as part of a **Flutter Internship Assignment**.
+Built as part of a **Vedaz Internship Assignment**.
