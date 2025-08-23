@@ -4,9 +4,9 @@ const Message = require('./models/Message');
 function setupSocket(server) {
   const io = new Server(server, {
     cors: {
-      origin: '*', // For production, restrict this to your frontend domain
-      methods: ['GET', 'POST']
-    }
+      origin: '*',
+      methods: ['GET', 'POST'],
+    },
   });
 
   io.on('connection', (socket) => {
@@ -14,23 +14,16 @@ function setupSocket(server) {
 
     socket.on('joinConversation', (conversationId) => {
       socket.join(conversationId);
-      console.log(`✅ User joined conversation: ${conversationId}`);
+      console.log(`✅ Joined conversation: ${conversationId}`);
     });
 
     socket.on('sendMessage', async ({ conversationId, senderId, text }) => {
-      try {
-        console.log('📤 Message received from client:', { conversationId, senderId, text });
+      console.log('📤 Message received from client:', text);
 
-        const message = new Message({ conversationId, sender: senderId, text });
-        await message.save();
+      const message = new Message({ conversationId, sender: senderId, text });
+      await message.save();
 
-        // Broadcast to everyone in that conversation room
-        io.to(conversationId).emit('messageReceived', message);
-
-        console.log('✅ Message saved & broadcasted');
-      } catch (err) {
-        console.error('❌ Error saving message:', err);
-      }
+      io.to(conversationId).emit('messageReceived', message);
     });
 
     socket.on('disconnect', () => {
@@ -39,4 +32,4 @@ function setupSocket(server) {
   });
 }
 
-module.exports = { setupSocket };
+module.exports = setupSocket;
