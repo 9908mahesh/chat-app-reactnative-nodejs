@@ -30,10 +30,10 @@ This is a **React Native Chat Application** built for the Flutter Internship Tas
 ## 📂 Project Screenshots
 
 ### ✅ Chat UI Loaded Successfully
-![Chat UI](images/chat_ui.png)
+![Chat UI](Chat UI.png)
 
-### ⚠ Error / Loading Issue Screenshot
-![Error Screenshot](images/error_screenshot.png)
+### ⚠ QR 
+![QR code generated](QR.png)
 
 ---
 
