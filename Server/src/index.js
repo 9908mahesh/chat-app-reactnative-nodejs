@@ -7,7 +7,7 @@ const { connect } = require('./db');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const convRoutes = require('./routes/conversations');
-const { setupSocket } = require('./socket');
+const setupSocket = require('./socket'); // ✅ No destructuring
 
 const app = express();
 app.use(cors());
